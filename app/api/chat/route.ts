@@ -1,10 +1,27 @@
 import { convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, streamText, type UIMessage } from 'ai'
+import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { achievements, education, experience, profile, projects, skillGroups, technologies } from '@/lib/profile'
 
 export const maxDuration = 30
 const MAX_MESSAGES = 20
 const MAX_MESSAGE_LENGTH = 2000
-const hasGatewayAuth = Boolean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN)
+
+function getAuthStatus() {
+  const geminiApiKey =
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
+    (process.env.AI_GATEWAY_API_KEY?.startsWith('AQ.') || process.env.AI_GATEWAY_API_KEY?.startsWith('AIza')
+      ? process.env.AI_GATEWAY_API_KEY
+      : undefined)
+  const hasDirectGeminiAuth = Boolean(geminiApiKey)
+  const hasGatewayAuth = Boolean((process.env.AI_GATEWAY_API_KEY && !hasDirectGeminiAuth) || process.env.VERCEL_OIDC_TOKEN)
+  return {
+    hasGatewayAuth,
+    hasDirectGeminiAuth,
+    geminiApiKey,
+    hasAuth: hasGatewayAuth || hasDirectGeminiAuth,
+  }
+}
 
 function localAnswer(question: string) {
   const q = question.toLowerCase()
@@ -34,7 +51,11 @@ function localStreamResponse(answer: string) {
 }
 
 export async function GET() {
-  return Response.json({ status: 'ok', mode: hasGatewayAuth ? 'ai' : 'portfolio-fallback' })
+  const { hasGatewayAuth, hasDirectGeminiAuth } = getAuthStatus()
+  return Response.json({
+    status: 'ok',
+    mode: hasDirectGeminiAuth ? 'gemini' : hasGatewayAuth ? 'ai-gateway' : 'portfolio-fallback',
+  })
 }
 
 export async function POST(request: Request) {
@@ -66,8 +87,10 @@ export async function POST(request: Request) {
     .join(' ')
     .slice(0, MAX_MESSAGE_LENGTH) || ''
 
+  const { hasGatewayAuth, hasDirectGeminiAuth, geminiApiKey, hasAuth } = getAuthStatus()
+
   // Keep the portfolio assistant useful locally and in previews without requiring a hosted model key.
-  if (!hasGatewayAuth) return localStreamResponse(localAnswer(question))
+  if (!hasAuth) return localStreamResponse(localAnswer(question))
 
   const context = [
     `${profile.name} is a ${profile.role}. ${profile.intro} Phone: ${profile.phone}; email: ${profile.email}; location: ${profile.location}.`,
@@ -81,8 +104,13 @@ export async function POST(request: Request) {
   ].join('\n')
 
   try {
+    const configuredModel = process.env.PORTFOLIO_CHAT_MODEL || 'google/gemini-2.0-flash'
+    const model = hasDirectGeminiAuth && geminiApiKey
+      ? createGoogleGenerativeAI({ apiKey: geminiApiKey })(configuredModel.replace(/^google\//, ''))
+      : configuredModel
+
     const result = streamText({
-      model: process.env.PORTFOLIO_CHAT_MODEL || 'google/gemini-2.5-flash',
+      model,
       system: `You are ${profile.name}'s portfolio assistant. Answer questions about Vardhan, his projects, skills, coding profiles, YouTube channel, experience, and ways to contact him. Be concise, friendly, and factual. Use only this context:\n${context}\nIf a question is outside this context, say you can only answer about Vardhan's portfolio and suggest a relevant topic. Do not invent dates, metrics, employers, or project claims.`,
       messages: await convertToModelMessages(messages as UIMessage[]),
       maxOutputTokens: 500,
@@ -92,11 +120,11 @@ export async function POST(request: Request) {
     return result.toUIMessageStreamResponse({
       onError: (error) => {
         console.error('Portfolio chat stream failed:', error)
-        return 'The assistant is temporarily unavailable. Please try again shortly.'
+        return localAnswer(question)
       },
     })
   } catch (error) {
     console.error('Portfolio chat request failed:', error)
-    return Response.json({ error: 'The assistant is temporarily unavailable. Please try again shortly.' }, { status: 503 })
+    return localStreamResponse(localAnswer(question))
   }
 }
