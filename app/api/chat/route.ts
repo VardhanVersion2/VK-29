@@ -104,7 +104,7 @@ export async function POST(request: Request) {
   ].join('\n')
 
   try {
-    const configuredModel = process.env.PORTFOLIO_CHAT_MODEL || 'google/gemini-2.0-flash'
+    const configuredModel = process.env.PORTFOLIO_CHAT_MODEL || 'google/gemini-flash-lite-latest'
     const model = hasDirectGeminiAuth && geminiApiKey
       ? createGoogleGenerativeAI({ apiKey: geminiApiKey })(configuredModel.replace(/^google\//, ''))
       : configuredModel
