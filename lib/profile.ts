@@ -15,7 +15,7 @@ export const profile = {
     github: 'https://github.com/VardhanVersion2',
     geeksforgeeks: '',
     email: 'mailto:vardhankushwaha555@gmail.com',
-    resume: 'https://drive.google.com/file/d/1hsiZNiUhKl5Lo-0AEvutDDzgiOyp7vbJ/view',
+    resume: 'https://drive.google.com/file/d/1akFFpNV-Vf02yLEfY2gutc8R2V-V9GhE/view?usp=sharing',
   },
 } as const
 
